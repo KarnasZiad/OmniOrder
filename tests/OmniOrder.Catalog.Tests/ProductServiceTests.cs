@@ -59,7 +59,7 @@ public sealed class ProductServiceTests
     }
 
     [Test]
-    public async Task Duplicate_sku_is_rejected_and_nothing_is_published()
+    public void Duplicate_sku_is_rejected_and_nothing_is_published()
     {
         var error = Assert.ThrowsAsync<DomainException>(() =>
             WithServiceAsync(s => s.CreateAsync(new CreateProductRequest("TSH-001", "Copy", null, null, 10m), CancellationToken.None)));
