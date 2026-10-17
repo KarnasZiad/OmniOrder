@@ -9,6 +9,9 @@ namespace OmniOrder.Ordering.Api.Consumers;
 public sealed partial class StockReservedConsumer(OrderingDbContext db, TimeProvider clock, ILogger<StockReservedConsumer> logger)
     : IConsumer<StockReserved>
 {
+    // The .NET 8 [LoggerMessage] generator needs an ILogger field (primary constructor parameters are not supported).
+    private readonly ILogger<StockReservedConsumer> _logger = logger;
+
     public async Task Consume(ConsumeContext<StockReserved> context)
     {
         var message = context.Message;

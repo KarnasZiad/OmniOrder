@@ -14,6 +14,9 @@ public sealed partial class OrderSubmittedConsumer(
     TimeProvider clock,
     ILogger<OrderSubmittedConsumer> logger) : IConsumer<OrderSubmitted>
 {
+    // The .NET 8 [LoggerMessage] generator needs an ILogger field (primary constructor parameters are not supported).
+    private readonly ILogger<OrderSubmittedConsumer> _logger = logger;
+
     public async Task Consume(ConsumeContext<OrderSubmitted> context)
     {
         var order = context.Message;
