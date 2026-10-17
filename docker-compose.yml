@@ -1,0 +1,125 @@
+name: omniorder
+
+x-dotnet-service: &dotnet-service
+  restart: unless-stopped
+  environment: &dotnet-env
+    RabbitMq__Host: rabbitmq
+    RabbitMq__Username: guest
+    RabbitMq__Password: guest
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://aspire-dashboard:18889
+    Logging__Console__FormatterName: json
+  depends_on: &dotnet-deps
+    postgres:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: omniorder
+      POSTGRES_PASSWORD: omniorder
+    volumes:
+      - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omniorder"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "15672:15672"   # management UI (guest / guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # OpenTelemetry backend: centralised logs, distributed traces and metrics of every service.
+  aspire-dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:9.0
+    environment:
+      DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
+    ports:
+      - "18888:18888"
+
+  catalog:
+    <<: *dotnet-service
+    build:
+      context: .
+      args:
+        PROJECT: src/Services/Catalog/OmniOrder.Catalog.Api
+        ASSEMBLY: OmniOrder.Catalog.Api
+    environment:
+      <<: *dotnet-env
+      OTEL_SERVICE_NAME: catalog
+      ConnectionStrings__Catalog: Host=postgres;Database=catalog;Username=omniorder;Password=omniorder
+
+  ordering:
+    <<: *dotnet-service
+    build:
+      context: .
+      args:
+        PROJECT: src/Services/Ordering/OmniOrder.Ordering.Api
+        ASSEMBLY: OmniOrder.Ordering.Api
+    environment:
+      <<: *dotnet-env
+      OTEL_SERVICE_NAME: ordering
+      ConnectionStrings__Ordering: Host=postgres;Database=ordering;Username=omniorder;Password=omniorder
+      Services__Catalog: http://catalog:8080
+    depends_on:
+      <<: *dotnet-deps
+      catalog:
+        condition: service_healthy
+
+  inventory:
+    <<: *dotnet-service
+    build:
+      context: .
+      args:
+        PROJECT: src/Services/Inventory/OmniOrder.Inventory.Api
+        ASSEMBLY: OmniOrder.Inventory.Api
+    environment:
+      <<: *dotnet-env
+      OTEL_SERVICE_NAME: inventory
+      ConnectionStrings__Inventory: Host=postgres;Database=inventory;Username=omniorder;Password=omniorder
+
+  gateway:
+    restart: unless-stopped
+    build:
+      context: .
+      args:
+        PROJECT: src/Gateway/OmniOrder.Gateway
+        ASSEMBLY: OmniOrder.Gateway
+    environment:
+      OTEL_SERVICE_NAME: gateway
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://aspire-dashboard:18889
+      Logging__Console__FormatterName: json
+      Cors__AllowedOrigins__0: http://localhost:3000
+      ReverseProxy__Clusters__catalog__Destinations__primary__Address: http://catalog:8080
+      ReverseProxy__Clusters__ordering__Destinations__primary__Address: http://ordering:8080
+      ReverseProxy__Clusters__inventory__Destinations__primary__Address: http://inventory:8080
+    ports:
+      - "8000:8080"
+    depends_on:
+      catalog:
+        condition: service_healthy
+      ordering:
+        condition: service_healthy
+      inventory:
+        condition: service_healthy
+
+  web:
+    build: ./web
+    ports:
+      - "3000:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+volumes:
+  pgdata:
